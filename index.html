@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>世界地図クイズ対戦</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0}header{background:#183153;color:white;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:1.25rem;margin:0}main{max-width:1250px;margin:auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px}
+.panel{background:white;border:1px solid #dce4ef;border-radius:14px;padding:14px;box-shadow:0 2px 8px #19385c0b}
+#map{height:65vh;min-height:420px;border-radius:10px;border:1px solid #cbd5e1;z-index:1}
+h2{font-size:1rem;margin:0 0 10px}p{line-height:1.5}.muted{color:#607086;font-size:.9rem}
+label{display:block;font-size:.9rem;font-weight:650;margin:10px 0 5px}input,select,button{font:inherit;border-radius:8px;padding:9px 10px;border:1px solid #c5d0df;width:100%}
+button{background:#2458a6;color:white;border:0;font-weight:700;cursor:pointer;margin-top:8px}button.secondary{background:#e8eef7;color:#183153}button.danger{background:#a52a37}button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px}.row>*{flex:1;min-width:0}.status{padding:8px 10px;border-radius:8px;background:#edf4ff;color:#234c83;font-size:.9rem;margin:8px 0}
+.pill{display:inline-block;background:#e8eef7;border-radius:99px;padding:3px 8px;font-size:.8rem}.hidden{display:none!important}
+#players{padding-left:20px;margin:8px 0}#players li{padding:3px 0}.score{font-variant-numeric:tabular-nums;font-weight:700}
+hr{border:0;border-top:1px solid #e1e7ef;margin:14px 0}.result{padding:10px;border-radius:8px;background:#f7f9fc;margin-top:8px}
+.small{font-size:.82rem}.leaflet-container{font:inherit}
+@media(max-width:850px){main{grid-template-columns:1fr}#map{height:54vh;min-height:350px}}
+</style>
+</head>
+<body>
+<header><h1>🌍 世界地図クイズ対戦</h1><span id="connection" class="pill">接続設定が必要です</span></header>
+<main>
+<section class="panel">
+  <div class="row">
+    <div><h2 id="mapTitle">世界地図</h2><div id="prompt" class="status">参加方法を選び、ルームに接続してください。</div></div>
+    <div style="max-width:150px"><span class="muted">ラウンド</span><div id="round" style="font-size:1.4rem;font-weight:800">—</div></div>
+  </div>
+  <div id="map"></div>
+  <p id="mapHelp" class="muted">回答するときは、地図上の場所をクリックしてください。クリック位置にピンが置かれます。</p>
+  <div class="row"><button id="submitAnswer" disabled>この場所で回答する</button><button id="clearPin" class="secondary">ピンを消す</button></div>
+  <div id="feedback" class="result hidden"></div>
+</section>
+<aside class="panel">
+  <h2>参加・接続</h2>
+  <p class="muted small">クラス全員で対戦するには、先生がSupabaseを用意し、全員が同じ接続情報とルームコードを使います。</p>
+  <label for="supabaseUrl">Supabase Project URL</label><input id="supabaseUrl" placeholder="https://xxxx.supabase.co">
+  <label for="supabaseKey">Supabase anon / publishable key</label><input id="supabaseKey" placeholder="公開用キー（秘密鍵は入力しない）">
+  <div class="row"><button id="connect">接続</button><button id="disconnect" class="secondary">切断</button></div>
+  <hr>
+  <label for="room">ルームコード</label><input id="room" value="SOCIAL01" maxlength="20">
+  <label for="nickname">名前（生徒用）</label><input id="nickname" placeholder="例：ユニ">
+  <div class="row"><button id="join">生徒として参加</button><button id="host" class="secondary">先生として開始</button></div>
+  <div id="roleStatus" class="status">未参加</div>
+  <div id="teacherTools" class="hidden">
+    <hr><h2>先生の操作</h2>
+    <label for="questionText">問題文</label><input id="questionText" value="エジプトの首都カイロを探そう">
+    <p class="muted small">地図をクリックして正解地点を置きます。地図上のピンは生徒の回答用です。先生は「正解地点を設定」モードにしてクリックしてください。</p>
+    <div class="row"><button id="setTargetMode" class="secondary">正解地点を設定</button><button id="saveTarget" disabled>地点を確定</button></div>
+    <div class="row"><button id="startRound">問題を開始</button><button id="endRound" class="secondary">回答を締切・採点</button></div>
+    <button id="nextRound" class="secondary">次の問題（回答リセット）</button>
+    <p class="muted small">設定した地点はカイロ付近の初期例です。正解地点を設定し直して使ってください。</p>
+  </div>
+  <hr>
+  <h2>ランキング</h2><ol id="players"><li class="muted">まだ参加者はいません</li></ol>
+  <div id="roundResults"></div>
+  <hr>
+  <details><summary>接続の注意</summary><p class="muted small">接続情報はこのブラウザ内だけに保存されません。ページを再読み込みすると再入力が必要です。公開ルームなので、推測されにくいルームコードを使い、授業外には共有しないでください。この試作品は正式な成績管理システムではありません。</p></details>
+</aside>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(() => {
+ const $=id=>document.getElementById(id);
+ const map=L.map('map',{worldCopyJump:true}).setView([25,10],2);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+   maxZoom:18, attribution:'&copy; OpenStreetMap contributors'
+ }).addTo(map);
+ let supabase=null, channel=null, role=null, room='', nickname='', target={lat:30.0444,lng:31.2357}, targetMarker=null, answerMarker=null, targetMode=false, selected=null, roundState={number:0,question:'',active:false,closed:false,target:null,answers:{}}, roster={}, scores={}, lastResults=[];
+ const targetIcon=L.divIcon({className:'',html:'<div style="background:#b91c1c;color:white;border:2px solid white;border-radius:50% 50% 50% 0;width:22px;height:22px;transform:rotate(-45deg);box-shadow:0 1px 5px #555"></div>',iconSize:[22,22],iconAnchor:[11,22]});
+ function setStatus(t){$('roleStatus').textContent=t}
+ function conn(t){$('connection').textContent=t}
+ function distKm(a,b){const R=6371,rad=x=>x*Math.PI/180,dLat=rad(b.lat-a.lat),dLng=rad(b.lng-a.lng),x=Math.sin(dLat/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
+ function render(){
+   $('round').textContent=roundState.number||'—';
+   $('prompt').textContent=roundState.question || '先生が問題を開始するまでお待ちください。';
+   $('submitAnswer').disabled=!(role==='student'&&roundState.active&&!roundState.closed&&selected);
+   $('teacherTools').classList.toggle('hidden',role!=='teacher');
+   const arr=Object.keys(roster).map(id=>({id,name:roster[id].name||id,score:scores[id]||0})).sort((a,b)=>b.score-a.score);
+   $('players').innerHTML=arr.length?arr.map(p=>`<li>${esc(p.name)} <span class="score">${p.score}点</span></li>`).join(''):'<li class="muted">まだ参加者はいません</li>';
+   if(role==='teacher') $('roleStatus').textContent=`先生モード／ルーム ${room}`;
+   if(roundState.target){
+     target=roundState.target;
+     if(targetMarker)targetMarker.remove();
+     targetMarker=L.marker([target.lat,target.lng],{icon:targetIcon}).addTo(map).bindPopup('正解地点');
+   } else if(targetMarker){targetMarker.remove();targetMarker=null}
+   $('startRound').disabled=!(role==='teacher'&&roundState.target);
+   $('endRound').disabled=!(role==='teacher'&&roundState.active&&!roundState.closed);
+   $('nextRound').disabled=role!=='teacher';
+   $('roundResults').innerHTML=lastResults.length?'<div class="result"><b>今回の結果</b>'+lastResults.map(x=>`<div>${esc(x.name)}：${Math.round(x.distance).toLocaleString()} km／${x.points}点</div>`).join('')+'</div>':'';
+ }
+ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+ function broadcast(type,payload){if(channel)channel.send({type:'broadcast',event:'game',payload:{type,room,...payload}})}
+ async function connect(){
+   const url=$('supabaseUrl').value.trim(),key=$('supabaseKey').value.trim();
+   if(!url||!key){alert('Supabase URL と公開用キーを入力してください。');return}
+   if(!window.supabase){alert('Supabaseライブラリを読み込めません。ネット接続を確認してください。');return}
+   try{
+     if(channel)await supabase.removeChannel(channel);
+     supabase=window.supabase.createClient(url,key);
+     conn('Supabase接続準備OK');
+     setStatus('接続設定済み。ルームコードと名前を入力してください。');
+   }catch(e){conn('接続エラー');alert('接続設定を確認してください：'+e.message)}
+ }
+ async function attach(roleChosen){
+   if(!supabase){alert('先にSupabaseへ接続してください。');return}
+   room=$('room').value.trim().toUpperCase();nickname=$('nickname').value.trim()|| (roleChosen==='teacher'?'先生':'生徒');
+   if(!room){alert('ルームコードを入力してください。');return}
+   role=roleChosen; roster={}; scores={}; lastResults=[]; selected=null;
+   if(answerMarker){answerMarker.remove();answerMarker=null}
+   channel=supabase.channel('geo-quiz-'+room,{config:{broadcast:{self:false},presence:{key:nickname+'-'+Math.random().toString(36).slice(2,7)}}});
+   channel.on('broadcast',{event:'game'},({payload})=>{
+     if(!payload||payload.room!==room)return;
+     if(payload.type==='request-state'&&role==='teacher'){broadcast('state',{roundState,roster,scores,lastResults})}
+     if(payload.type==='state'&&role==='student'){roundState=payload.roundState||roundState;roster=payload.roster||roster;scores=payload.scores||scores;lastResults=payload.lastResults||[];render()}
+     if(payload.type==='join'&&role==='teacher'){roster[payload.id]={name:payload.name};scores[payload.id]=scores[payload.id]||0;broadcast('state',{roundState,roster,scores,lastResults});render()}
+     if(payload.type==='answer'&&role==='teacher'){
+       if(!roundState.active||roundState.closed||payload.round!==roundState.number)return;
+       if(!roundState.answers)roundState.answers={};
+       roundState.answers[payload.id]={name:payload.name,lat:payload.lat,lng:payload.lng,elapsed:payload.elapsed};
+       roster[payload.id]={name:payload.name};broadcast('state',{roundState,roster,scores,lastResults});render();
+     }
+     if(payload.type==='state'||payload.type==='round'||payload.type==='score'){
+       if(role==='student'){roundState=payload.roundState||roundState;roster=payload.roster||roster;scores=payload.scores||scores;lastResults=payload.lastResults||[];render()}
+     }
+   }).subscribe(async status=>{
+     if(status==='SUBSCRIBED'){
+       conn('リアルタイム接続中');
+       if(role==='teacher'){
+         if(!roundState.target)roundState.target={lat:target.lat,lng:target.lng};
+         setStatus('先生モードで待機中。正解地点を設定して問題を開始してください。');
+         broadcast('state',{roundState,roster,scores,lastResults});
+       } else {
+         setStatus(`参加中：${room}／先生の出題を待っています`);
+         broadcast('join',{id:nickname,name:nickname});
+         broadcast('request-state',{id:nickname});
+       }
+       render();
+     } else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){conn('通信エラー：設定を確認')}
+   });
+ }
+ map.on('click',e=>{
+   if(role==='teacher'&&targetMode){
+     target={lat:e.latlng.lat,lng:e.latlng.lng};
+     if(targetMarker)targetMarker.remove();
+     targetMarker=L.marker(e.latlng,{icon:targetIcon}).addTo(map);
+     $('saveTarget').disabled=false;
+   } else if(role==='student'&&roundState.active&&!roundState.closed){
+     selected={lat:e.latlng.lat,lng:e.latlng.lng};
+     if(answerMarker)answerMarker.remove();
+     answerMarker=L.marker(e.latlng).addTo(map).bindPopup('あなたの回答地点').openPopup();
+     $('submitAnswer').disabled=false;
+   }
+ });
+ $('connect').onclick=connect;
+ $('disconnect').onclick=async()=>{if(channel&&supabase)await supabase.removeChannel(channel);channel=null;role=null;conn('切断しました');setStatus('未参加');render()};
+ $('join').onclick=()=>attach('student');
+ $('host').onclick=()=>attach('teacher');
+ $('setTargetMode').onclick=()=>{targetMode=true;setStatus('正解地点設定中：地図をクリックしてください')};
+ $('saveTarget').onclick=()=>{roundState.target={...target};roundState.question=$('questionText').value.trim();targetMode=false;broadcast('state',{roundState,roster,scores,lastResults});render();setStatus('正解地点を設定しました')};
+ $('startRound').onclick=()=>{if(!roundState.target)return;roundState.number+=1;roundState.question=$('questionText').value.trim()||'地図上で正解地点を探そう';roundState.active=true;roundState.closed=false;roundState.startedAt=Date.now();roundState.answers={};lastResults=[];selected=null;if(answerMarker){answerMarker.remove();answerMarker=null}broadcast('round',{roundState,roster,scores,lastResults});render();setStatus('出題中：生徒の回答を受け付けています')};
+ $('submitAnswer').onclick=()=>{if(!selected||!roundState.active||roundState.closed)return;broadcast('answer',{id:nickname,name:nickname,round:roundState.number,lat:selected.lat,lng:selected.lng,elapsed:Date.now()-(roundState.startedAt||Date.now())});$('submitAnswer').disabled=true;$('feedback').classList.remove('hidden');$('feedback').textContent='回答を送信しました。先生が締め切るまでお待ちください。';};
+ $('clearPin').onclick=()=>{selected=null;if(answerMarker){answerMarker.remove();answerMarker=null}render()};
+ $('endRound').onclick=()=>{
+   if(role!=='teacher')return;
+   roundState.active=false;roundState.closed=true;
+   const answers=Object.entries(roundState.answers||{}).map(([id,a])=>({id,...a,distance:distKm(a,roundState.target)}));
+   const maxD=Math.max(answers.reduce((m,a)=>Math.max(m,a.distance),0),1);
+   const fastest=Math.max(...answers.map(a=>a.elapsed||0),1);
+   lastResults=answers.map(a=>{
+     const distancePoints=Math.round(800*Math.max(0,1-a.distance/maxD));
+     const speedPoints=Math.round(200*Math.max(0,1-(a.elapsed||fastest)/fastest));
+     const points=distancePoints+speedPoints;scores[a.id]=(scores[a.id]||0)+points;
+     return {...a,points};
+   }).sort((a,b)=>b.points-a.points);
+   broadcast('score',{roundState,roster,scores,lastResults});render();setStatus('締切・採点しました');
+ };
+ $('nextRound').onclick=()=>{roundState.active=false;roundState.closed=true;roundState.answers={};roundState.question='次の問題を準備しています';selected=null;if(answerMarker){answerMarker.remove();answerMarker=null}broadcast('state',{roundState,roster,scores,lastResults});render();setStatus('次の問題を設定してください')};
+ render();
+})();
+</script>
+</body>
+</html>
